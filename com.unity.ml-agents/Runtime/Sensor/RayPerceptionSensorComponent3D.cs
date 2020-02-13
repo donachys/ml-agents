@@ -29,5 +29,24 @@ namespace MLAgents
         {
             return endVerticalOffset;
         }
+        public override ISensor CreateSensor()
+        {
+            RayPerceptionSensor.RayCastHitObserver rcho = null;
+            var rayAngles = GetRayAngles(raysPerDirection, maxRayDegrees);
+            rcho = gameObject.GetComponent<IAgentDelegate>().GetObs();
+
+            m_RaySensor = new RayPerceptionSensor(sensorName, rayLength, detectableTags, rayAngles,
+                transform, GetStartVerticalOffset(), GetEndVerticalOffset(), sphereCastRadius, GetCastType(),
+                rayLayerMask, rcho
+            );
+
+            if (observationStacks != 1)
+            {
+                var stackingSensor = new StackingSensor(m_RaySensor, observationStacks);
+                return stackingSensor;
+            }
+
+            return m_RaySensor;
+        }
     }
 }

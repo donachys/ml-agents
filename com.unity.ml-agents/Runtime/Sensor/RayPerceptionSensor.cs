@@ -27,6 +27,10 @@ namespace MLAgents
         Transform m_Transform;
         int m_LayerMask;
 
+        RayCastHitObserver m_RayCastHitObserver;
+
+        public delegate void RayCastHitObserver(GameObject go);
+
         /// <summary>
         /// Debug information for the raycast hits. This is used by the RayPerceptionSensorComponent.
         /// </summary>
@@ -70,7 +74,7 @@ namespace MLAgents
 
         public RayPerceptionSensor(string name, float rayDistance, List<string> detectableObjects, float[] angles,
                                    Transform transform, float startOffset, float endOffset, float castRadius, CastType castType,
-                                   int rayLayerMask)
+                                   int rayLayerMask, RayCastHitObserver rayCastHitObserver = null)
         {
             var numObservations = (detectableObjects.Count + 2) * angles.Length;
             m_Shape = new[] { numObservations };
@@ -88,6 +92,7 @@ namespace MLAgents
             m_CastRadius = castRadius;
             m_CastType = castType;
             m_LayerMask = rayLayerMask;
+            m_RayCastHitObserver = rayCastHitObserver;
 
             if (Application.isEditor)
             {
@@ -102,7 +107,7 @@ namespace MLAgents
                 PerceiveStatic(
                     m_RayDistance, m_Angles, m_DetectableObjects, m_StartOffset, m_EndOffset,
                     m_CastRadius, m_Transform, m_CastType, m_Observations, m_LayerMask,
-                    m_DebugDisplayInfo
+                    m_DebugDisplayInfo, m_RayCastHitObserver
                 );
                 adapter.AddRange(m_Observations);
             }
@@ -133,6 +138,7 @@ namespace MLAgents
             return SensorCompressionType.None;
         }
 
+
         /// <summary>
         /// Evaluates a perception vector to be used as part of an observation of an agent.
         /// Each element in the rayAngles array determines a sublist of data to the observation.
@@ -159,13 +165,14 @@ namespace MLAgents
         /// <param name="perceptionBuffer">Output array of floats. Must be (num rays) * (num tags + 2) in size.</param>
         /// <param name="layerMask">Filtering options for the casts</param>
         /// <param name="debugInfo">Optional debug information output, only used by RayPerceptionSensor.</param>
+        /// <param name="rayCastHitObserver">nodata.</param>
         ///
         public static void PerceiveStatic(float unscaledRayLength,
             IReadOnlyList<float> rayAngles, IReadOnlyList<string> detectableObjects,
             float startOffset, float endOffset, float unscaledCastRadius,
             Transform transform, CastType castType, float[] perceptionBuffer,
             int layerMask = Physics.DefaultRaycastLayers,
-            DebugDisplayInfo debugInfo = null)
+            DebugDisplayInfo debugInfo = null, RayCastHitObserver rayCastHitObserver = null )
         {
             Array.Clear(perceptionBuffer, 0, perceptionBuffer.Length);
             if (debugInfo != null)
@@ -232,7 +239,6 @@ namespace MLAgents
                         castHit = Physics.Raycast(startPositionWorld, rayDirection, out rayHit,
                             scaledRayLength, layerMask);
                     }
-
                     // If scaledRayLength is 0, we still could have a hit with sphere casts (maybe?).
                     // To avoid 0/0, set the fraction to 0.
                     hitFraction = castHit ? (scaledRayLength > 0 ? rayHit.distance / scaledRayLength : 0.0f) : 1.0f;
@@ -282,6 +288,7 @@ namespace MLAgents
                             perceptionBuffer[bufferOffset + i] = 1;
                             perceptionBuffer[bufferOffset + detectableObjects.Count + 1] = hitFraction;
                             hitTaggedObject = true;
+                            rayCastHitObserver(hitObject);
                             break;
                         }
                     }
