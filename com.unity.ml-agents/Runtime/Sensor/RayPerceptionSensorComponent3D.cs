@@ -11,7 +11,7 @@ namespace MLAgents
         [Tooltip("Ray start is offset up or down by this amount.")]
         public float startVerticalOffset;
 
-        [Range(-10f, 10f)]
+        [Range(-100f, 100f)]
         [Tooltip("Ray end is offset up or down by this amount.")]
         public float endVerticalOffset;
 
