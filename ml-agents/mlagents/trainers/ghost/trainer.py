@@ -40,6 +40,7 @@ class GhostTrainer(Trainer):
 
         self.internal_policy_queues: List[AgentManagerQueue[Policy]] = []
         self.internal_trajectory_queues: List[AgentManagerQueue[Trajectory]] = []
+        self.ignored_trajectory_queues: List[AgentManagerQueue[Trajectory]] = []
         self.learning_policy_queues: Dict[str, AgentManagerQueue[Policy]] = {}
 
         # assign ghost's stats collection to wrapped trainer's
@@ -57,6 +58,7 @@ class GhostTrainer(Trainer):
         self.policy_snapshots: List[Any] = []
         self.snapshot_counter: int = 0
         self.learning_behavior_name: str = None
+        self.global_learning_behavior_name: str = None
         self.current_policy_snapshot = None
         self.last_save = 0
         self.last_swap = 0
@@ -75,7 +77,9 @@ class GhostTrainer(Trainer):
         Returns the number of steps the trainer has performed
         :return: the step count of the trainer
         """
-        return self.trainer.get_step
+        return self.step
+
+    #    return self.trainer.get_step
 
     @property
     def reward_buffer(self) -> Deque[float]:
@@ -87,22 +91,22 @@ class GhostTrainer(Trainer):
          """
         return self.trainer.reward_buffer
 
-    def _write_summary(self, step: int) -> None:
-        """
-        Saves training statistics to Tensorboard.
-        """
-        opponents = np.array(self.policy_elos, dtype=np.float32)
-        LOGGER.info(
-            " Learning brain {} ELO: {:0.3f}\n"
-            "Mean Opponent ELO: {:0.3f}"
-            " Std Opponent ELO: {:0.3f}".format(
-                self.learning_behavior_name,
-                self.current_elo,
-                opponents.mean(),
-                opponents.std(),
-            )
-        )
-        self.stats_reporter.add_stat("ELO", self.current_elo)
+    # def _write_summary(self, step: int) -> None:
+    #    """
+    #    Saves training statistics to Tensorboard.
+    #    """
+    #    opponents = np.array(self.policy_elos, dtype=np.float32)
+    #    LOGGER.info(
+    #        " Learning brain {} ELO: {:0.3f}\n"
+    #        "Mean Opponent ELO: {:0.3f}"
+    #        " Std Opponent ELO: {:0.3f}".format(
+    #            self.learning_behavior_name,
+    #            self.current_elo,
+    #            opponents.mean(),
+    #            opponents.std(),
+    #        )
+    #    )
+    #    self.stats_reporter.add_stat("ELO", self.current_elo)
 
     def _process_trajectory(self, trajectory: Trajectory) -> None:
         if trajectory.done_reached and not trajectory.max_step_reached:
@@ -119,6 +123,7 @@ class GhostTrainer(Trainer):
             )
             self.current_elo += change
             self.policy_elos[self.current_opponent] -= change
+        super()._process_trajectory(trajectory)
 
     def _is_ready_update(self) -> bool:
         return False
@@ -134,16 +139,26 @@ class GhostTrainer(Trainer):
             self.trajectory_queues, self.internal_trajectory_queues
         ):
             try:
-                t = traj_queue.get_nowait()
-                # adds to wrapped trainers queue
-                internal_traj_queue.put(t)
-                self._process_trajectory(t)
+                # We grab at most the maximum length of the queue.
+                # This ensures that even if the queue is being filled faster than it is
+                # being emptied, the trajectories in the queue are on-policy.
+                for _ in range(traj_queue.maxlen):
+                    t = traj_queue.get_nowait()
+                    # adds to wrapped trainers queue
+
+                    if (
+                        self.global_learning_behavior_name
+                        == internal_traj_queue.behavior_id
+                    ):
+                        internal_traj_queue.put(t)
+                    self.step += len(t.steps) 
+                    #self._process_trajectory(t)
             except AgentManagerQueue.Empty:
                 pass
 
         self.next_summary_step = self.trainer.next_summary_step
         self.trainer.advance()
-        self._maybe_write_summary(self.get_step)
+        # self._maybe_write_summary(self.get_step)
 
         for internal_q in self.internal_policy_queues:
             # Get policies that correspond to the policy queue in question
@@ -154,13 +169,21 @@ class GhostTrainer(Trainer):
             except AgentManagerQueue.Empty:
                 pass
 
-        if self.get_step - self.last_save > self.steps_between_save:
+        if self.get_step - self.last_save > self.steps_between_save and self.learning_behavior_name == self.global_learning_behavior_name:
             self._save_snapshot(self.trainer.policy)
             self.last_save = self.get_step
 
         if self.get_step - self.last_swap > self.steps_between_swap:
             self._swap_snapshots()
             self.last_swap = self.get_step
+
+        # Dump trajectories from non-learning policy
+        for traj_queue in self.ignored_trajectory_queues:
+            try:
+                for _ in range(traj_queue.maxlen):
+                    traj_queue.get_nowait()
+            except AgentManagerQueue.Empty:
+                pass
 
     def end_episode(self):
         self.trainer.end_episode()
@@ -175,17 +198,25 @@ class GhostTrainer(Trainer):
         return self.trainer.create_policy(brain_parameters)
 
     def add_policy(self, name_behavior_id: str, policy: TFPolicy) -> None:
-        # for saving/swapping snapshots
-        policy.init_load_weights()
+        """
+        Adds policy to trainer. For the first policy added, add a trainer
+        to the policy and set the learning behavior name to name_behavior_id.
+        :param name_behavior_id: Behavior ID that the policy should belong to.
+        :param policy: Policy to associate with name_behavior_id.
+        """
         self.policies[name_behavior_id] = policy
+        policy.create_tf_graph()
 
         # First policy encountered
         if not self.learning_behavior_name:
             weights = policy.get_weights()
             self.current_policy_snapshot = weights
-            self._save_snapshot(policy)
             self.trainer.add_policy(name_behavior_id, policy)
+            self._save_snapshot(policy)  # Need to save after trainer initializes policy
             self.learning_behavior_name = name_behavior_id
+        else:
+            # for saving/swapping snapshots
+            policy.init_load_weights()
 
     def get_policy(self, name_behavior_id: str) -> TFPolicy:
         return self.policies[name_behavior_id]
@@ -203,7 +234,9 @@ class GhostTrainer(Trainer):
         for q in self.policy_queues:
             name_behavior_id = q.behavior_id
             # here is the place for a sampling protocol
-            if name_behavior_id == self.learning_behavior_name:
+            if (
+                name_behavior_id == self.global_learning_behavior_name
+            ):  # self.learning_behavior_name:
                 continue
             elif np.random.uniform() < (1 - self.play_against_current_self_ratio):
                 x = np.random.randint(len(self.policy_snapshots))
@@ -214,8 +247,12 @@ class GhostTrainer(Trainer):
                 self.policy_elos[-1] = self.current_elo
             self.current_opponent = -1 if x == "current" else x
             LOGGER.debug(
-                "Step {}: Swapping snapshot {} to id {} with {} learning".format(
-                    self.get_step, x, name_behavior_id, self.learning_behavior_name
+                "Step {}: Swapping snapshot {} to id {} with {} local learning and {} global learning".format(
+                    self.get_step,
+                    x,
+                    name_behavior_id,
+                    self.learning_behavior_name,
+                    self.global_learning_behavior_name,
                 )
             )
             policy = self.get_policy(name_behavior_id)
@@ -256,6 +293,8 @@ class GhostTrainer(Trainer):
 
             self.internal_trajectory_queues.append(internal_trajectory_queue)
             self.trainer.subscribe_trajectory_queue(internal_trajectory_queue)
+        else:
+            self.ignored_trajectory_queues.append(trajectory_queue)
 
 
 # Taken from https://github.com/Unity-Technologies/ml-agents/pull/1975 and

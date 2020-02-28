@@ -39,6 +39,7 @@ def create_mock_batchedstep(
     num_vis_observations: int = 0,
     action_shape: List[int] = None,
     discrete: bool = False,
+    done: bool = False,
 ) -> BatchedStepResult:
     """
     Creates a mock BatchedStepResult with observations. Imitates constant
@@ -68,7 +69,7 @@ def create_mock_batchedstep(
         ]
 
     reward = np.array(num_agents * [1.0], dtype=np.float32)
-    done = np.array(num_agents * [False], dtype=np.bool)
+    done = np.array(num_agents * [done], dtype=np.bool)
     max_step = np.array(num_agents * [False], dtype=np.bool)
     agent_id = np.arange(num_agents, dtype=np.int32)
 
@@ -112,10 +113,11 @@ def make_fake_trajectory(
         done = False
         if is_discrete:
             action_size = len(action_space)
+            action_probs = np.ones(np.sum(action_space), dtype=np.float32)
         else:
             action_size = action_space[0]
+            action_probs = np.ones((1), dtype=np.float32)
         action = np.zeros(action_size, dtype=np.float32)
-        action_probs = np.ones(action_size, dtype=np.float32)
         action_pre = np.zeros(action_size, dtype=np.float32)
         action_mask = (
             [[False for _ in range(branch)] for branch in action_space]
