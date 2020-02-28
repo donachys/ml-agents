@@ -35,8 +35,6 @@ namespace MLAgents
         /// </summary>
         public IReadOnlyList<string> detectableTags;
 
-        RayCastHitObserver m_RayCastHitObserver;
-
         public delegate void RayCastHitObserver(GameObject go);
 
         /// <summary>
@@ -65,6 +63,8 @@ namespace MLAgents
         /// Transform of the GameObject.
         /// </summary>
         public Transform transform;
+
+        public RayCastHitObserver rayCastHitObserver;
 
         /// <summary>
         /// Whether to perform the casts in 2D or 3D.
@@ -455,6 +455,7 @@ namespace MLAgents
                     {
                         rayOutput.hitTaggedObject = true;
                         rayOutput.hitTagIndex = i;
+                        input.rayCastHitObserver?.Invoke(hitObject);
                         break;
                     }
                 }

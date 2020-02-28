@@ -60,14 +60,10 @@ namespace MLAgents
         }
         public override ISensor CreateSensor()
         {
-            RayPerceptionSensor.RayCastHitObserver rcho = null;
             var rayAngles = GetRayAngles(raysPerDirection, maxRayDegrees);
-            rcho = gameObject.GetComponent<IAgentDelegate>().GetObs();
+            var rayPerceptionInput = GetRayPerceptionInput();
 
-            m_RaySensor = new RayPerceptionSensor(sensorName, rayLength, detectableTags, rayAngles,
-                transform, GetStartVerticalOffset(), GetEndVerticalOffset(), sphereCastRadius, GetCastType(),
-                rayLayerMask, rcho
-            );
+            m_RaySensor = new RayPerceptionSensor(sensorName, rayPerceptionInput);
 
             if (observationStacks != 1)
             {
@@ -76,6 +72,27 @@ namespace MLAgents
             }
 
             return m_RaySensor;
+        }
+
+        RayPerceptionInput GetRayPerceptionInput()
+        {
+            RayPerceptionInput.RayCastHitObserver rcho = null;
+            var rayAngles = GetRayAngles(raysPerDirection, maxRayDegrees);
+            rcho = gameObject.GetComponent<IAgentDelegate>().GetObs();
+
+            var rayPerceptionInput = new RayPerceptionInput();
+            rayPerceptionInput.rayLength = rayLength;
+            rayPerceptionInput.detectableTags = detectableTags;
+            rayPerceptionInput.angles = rayAngles;
+            rayPerceptionInput.startOffset = GetStartVerticalOffset();
+            rayPerceptionInput.endOffset = GetEndVerticalOffset();
+            rayPerceptionInput.castRadius = sphereCastRadius;
+            rayPerceptionInput.transform = transform;
+            rayPerceptionInput.castType = GetCastType();
+            rayPerceptionInput.layerMask = rayLayerMask;
+            rayPerceptionInput.rayCastHitObserver = rcho;
+
+            return rayPerceptionInput;
         }
     }
 }

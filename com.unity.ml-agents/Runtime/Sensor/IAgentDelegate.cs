@@ -5,6 +5,6 @@ namespace MLAgents
 {
     public interface IAgentDelegate
     {
-        RayPerceptionSensor.RayCastHitObserver GetObs();
+        RayPerceptionInput.RayCastHitObserver GetObs();
     }
 }
